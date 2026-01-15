@@ -2,7 +2,7 @@ import attack
 import recommender
 from util.DataLoader import DataLoader
 from util.tool import isClass, getPopularItemId, dataSave, targetItemSelect
-from util.metrics import AttackMetric
+from util.metrics import AttackMetric, RecommendMetric
 import time
 import random
 import numpy as np
@@ -31,6 +31,8 @@ class ARLib():
         self.precision=[]
         self.recall = []
         self.ndcg = []
+        self.cand_hr = []
+        self.cand_er = []
         self.RecommendTestResult = []
 
         # Record the process
@@ -157,6 +159,27 @@ class ARLib():
         if attack is None:
             # recommender test result in clean data
             _, self.rawRecommendresult = self.recommendModel.test()
+
+            # Calculate additional candidate pool metrics
+            cand_hr = RecommendMetric.hit_ratio_candidate(self.recommendModel.data.test_set, self.recommendModel, self.recommendModel.data, self.top)
+            attackmetrics = AttackMetric(self.recommendModel, self.targetItem, self.top)
+            cand_er_list = attackmetrics.exposure_ratio_candidate()
+            cand_er = {self.top[i]: cand_er_list[i] for i in range(len(self.top))}
+
+            # Insert into results
+            new_results = []
+            curr_top = None
+            for r in self.rawRecommendresult:
+                new_results.append(r)
+                if r.startswith('Top '):
+                    curr_top = int(r.split(' ')[1])
+                elif r.startswith('Hit Ratio:') and curr_top is not None:
+                    if curr_top in cand_hr:
+                        new_results.append(f'Hit Ratio (1+99):{cand_hr[curr_top]}\n')
+                    if curr_top in cand_er:
+                        new_results.append(f'Exposure Ratio (1+99):{cand_er[curr_top]}\n')
+            self.rawRecommendresult = new_results
+
             message = "Recommender model {} is tested in clean data".format(self.recommendModelName)
             message += "\n" * 2 + "-" * 10 + "Test Result (Evaluation Metrics @Top-({})) in Clean Data".format(
                 self.recommendArg.topK) + "-" * 10 + "\n"
@@ -165,19 +188,39 @@ class ARLib():
             self.logger.info(message)
             print(message)
         else:
-            # recommender test  result in poison data
+            # recommender test result in poison data
             _, self.attackRecommendresult = self.recommendModel.test()
+
+            # Calculate additional candidate pool metrics
+            cand_hr = RecommendMetric.hit_ratio_candidate(self.recommendModel.data.test_set, self.recommendModel, self.recommendModel.data, self.top)
+            attackmetrics = AttackMetric(self.recommendModel, self.targetItem, self.top)
+            cand_er_list = attackmetrics.exposure_ratio_candidate()
+            cand_er = {self.top[i]: cand_er_list[i] for i in range(len(self.top))}
+
+            # Insert into results
+            new_results = []
+            curr_top = None
+            for r in self.attackRecommendresult:
+                new_results.append(r)
+                if r.startswith('Top '):
+                    curr_top = int(r.split(' ')[1])
+                elif r.startswith('Hit Ratio:') and curr_top is not None:
+                    if curr_top in cand_hr:
+                        new_results.append(f'Hit Ratio (1+99):{cand_hr[curr_top]}\n')
+                    if curr_top in cand_er:
+                        new_results.append(f'Exposure Ratio (1+99):{cand_er[curr_top]}\n')
+            self.attackRecommendresult = new_results
+
             self.result.append(dict())
             tempName = "Top 10\n"
             for i in range(len(self.rawRecommendresult)):
                 if "Top" in self.rawRecommendresult[i]:
                     tempName = self.rawRecommendresult[i]
                     self.result[-1][tempName] = dict()
-                else:
-                    self.result[-1][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] = (float(
-                        re.sub("[^0-9\.]", "", self.attackRecommendresult[i])) - float(
-                        re.sub("[^0-9\.]", "", self.rawRecommendresult[i]))) / float(
-                        re.sub("[^0-9\.]", "", self.rawRecommendresult[i]))
+                elif ":" in self.attackRecommendresult[i]:
+                    metric_name, attack_val = self.attackRecommendresult[i].split(":")
+                    _, raw_val = self.rawRecommendresult[i].split(":")
+                    self.result[-1][tempName][metric_name.strip()] = (float(attack_val) - float(raw_val)) / (float(raw_val) if float(raw_val) != 0 else 1)
 
             self.RecommendTestResult.append(dict())
             tempName = "Top 10\n"
@@ -185,21 +228,23 @@ class ARLib():
                 if "Top" in self.rawRecommendresult[i]:
                     tempName = self.rawRecommendresult[i]
                     self.RecommendTestResult[-1][tempName] = dict()
-                else:
-                    self.RecommendTestResult[-1][tempName][
-                        re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] = float(
-                        re.sub("[^0-9\.]", "", self.attackRecommendresult[i]))
+                elif ":" in self.attackRecommendresult[i]:
+                    metric_name, attack_val = self.attackRecommendresult[i].split(":")
+                    self.RecommendTestResult[-1][tempName][metric_name.strip()] = float(attack_val)
 
-            attackmetrics = AttackMetric(self.recommendModel, self.targetItem, self.top)
             self.hitRate.append(attackmetrics.hitRate())
             self.precision.append(attackmetrics.precision())
             self.recall.append(attackmetrics.recall())
             self.ndcg.append(attackmetrics.NDCG())
+            self.cand_hr.append([cand_hr[t] for t in self.top])
+            self.cand_er.append(cand_er_list)
 
             result = dict()
             for i, j in enumerate(self.top):
                 result["Top " + str(j)] = dict()
                 result["Top " + str(j)]["HitRate"] = self.hitRate[-1][i]
+                result["Top " + str(j)]["Hit Ratio (1+99)"] = self.cand_hr[-1][i]
+                result["Top " + str(j)]["Exposure Ratio (1+99)"] = self.cand_er[-1][i]
                 result["Top " + str(j)]["Precision"] = self.precision[-1][i]
                 result["Top " + str(j)]["Recall"] = self.recall[-1][i]
                 result["Top " + str(j)]["NDCG"] = self.ndcg[-1][i]
@@ -274,7 +319,15 @@ class ARLib():
 
         self.avgNDCGAttack = []
         for i in range(len(self.ndcg[0])):
-            self.avgNDCGAttack.append(sum(map(lambda x: x[i], self.ndcg)) / len(self.ndcg))
+            self.avgNDCGAttack.append(sum(map(lambda x: x[i], self.ndcg)) / len(self.ndcg) if self.ndcg else 0)
+
+        self.avgCandHRAttack = []
+        for i in range(len(self.cand_hr[0])):
+            self.avgCandHRAttack.append(sum(map(lambda x: x[i], self.cand_hr)) / len(self.cand_hr) if self.cand_hr else 0)
+
+        self.avgCandERAttack = []
+        for i in range(len(self.cand_er[0])):
+            self.avgCandERAttack.append(sum(map(lambda x: x[i], self.cand_er)) / len(self.cand_er) if self.cand_er else 0)
 
         tempName = "Top 10\n"
         for i in range(len(self.rawRecommendresult)):
@@ -282,11 +335,13 @@ class ARLib():
                 tempName = self.rawRecommendresult[i]
                 if len(self.result)!=1:self.result[-1][tempName] = dict()
             elif len(self.result)==1:
-                self.result[-1][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] =\
-                    self.result[0][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]]
+                metric_name = self.rawRecommendresult[i].split(":")[0].strip()
+                self.result[-1][tempName][metric_name] =\
+                    self.result[0][tempName][metric_name]
             else:
-                self.result[-1][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] = sum(
-                    [self.result[j][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] for j in
+                metric_name = self.rawRecommendresult[i].split(":")[0].strip()
+                self.result[-1][tempName][metric_name] = sum(
+                    [self.result[j][tempName][metric_name] for j in
                      range(len(self.result) - 1)]) / (len(self.result) - 1)
 
         tempName = "Top 10\n"
@@ -295,11 +350,13 @@ class ARLib():
                 tempName = self.rawRecommendresult[i]
                 if len(self.RecommendTestResult)!=1:self.RecommendTestResult[-1][tempName] = dict()
             elif len(self.RecommendTestResult)==1:
-                self.RecommendTestResult[-1][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] =\
-                    self.RecommendTestResult[0][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]]
+                metric_name = self.rawRecommendresult[i].split(":")[0].strip()
+                self.RecommendTestResult[-1][tempName][metric_name] =\
+                    self.RecommendTestResult[0][tempName][metric_name]
             else:
-                self.RecommendTestResult[-1][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] = sum(
-                    [self.RecommendTestResult[j][tempName][re.sub("[0-9\.]", "", self.rawRecommendresult[i])[:-1]] for j
+                metric_name = self.rawRecommendresult[i].split(":")[0].strip()
+                self.RecommendTestResult[-1][tempName][metric_name] = sum(
+                    [self.RecommendTestResult[j][tempName][metric_name] for j
                      in
                      range(len(self.RecommendTestResult) - 1)]) / (len(self.RecommendTestResult) - 1)
 
@@ -320,6 +377,8 @@ class ARLib():
         for i, j in enumerate(self.top):
             result["Top " + str(j)] = dict()
             result["Top " + str(j)]["HitRate"] = self.avgHitRateAttack[i]
+            result["Top " + str(j)]["Hit Ratio (1+99)"] = self.avgCandHRAttack[i]
+            result["Top " + str(j)]["Exposure Ratio (1+99)"] = self.avgCandERAttack[i]
             result["Top " + str(j)]["Precision"] = self.avgPrecisionAttack[i]
             result["Top " + str(j)]["Recall"] = self.avgRecallAttack[i]
             result["Top " + str(j)]["NDCG"] = self.avgNDCGAttack[i]

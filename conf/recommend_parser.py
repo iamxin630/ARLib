@@ -5,7 +5,7 @@ def recommend_parse_args():
     parser = argparse.ArgumentParser()
 
     # ===== dataset ===== #
-    parser.add_argument("--dataset", nargs="?", default="ml-1M", help="Choose a dataset:[FilmTrust, ]")
+    parser.add_argument("--dataset", nargs="?", default="CD_Kitchen", help="Choose a dataset:[FilmTrust, ]")
     parser.add_argument("--data_path", nargs="?", default="data/clean/", help="data path.")
     parser.add_argument("--training_data", nargs="?", default="/train.txt", help="training data path.")
     parser.add_argument("--val_data", nargs="?", default="/val.txt", help="validation data path.")
@@ -24,11 +24,12 @@ def recommend_parse_args():
     parser.add_argument("--cuda", type=bool, default=True, help="use gpu or not")
     parser.add_argument("--gpu_id", type=str, default='0', help="gpu id")
     parser.add_argument('--seed', nargs='?', default=2018, help='random seed')
-    parser.add_argument('--topK', nargs='?', default='50', help='topK')
+    parser.add_argument('--topK', nargs='?', default='30', help='topK')
 
     # ===== save model ===== #
     parser.add_argument("--load", type=bool, default=True, help="load existed model or not")
     parser.add_argument("--save", type=bool, default=True, help="save model or not")
     parser.add_argument("--save_dir", type=str, default="./modelsaved/", help="output directory for model")
 
-    return parser.parse_args()
+    args, _ = parser.parse_known_args()
+    return args

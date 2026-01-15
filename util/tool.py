@@ -93,6 +93,38 @@ def targetItemSelect(data, arg, popularThreshold=0.1):
             # targetItem = random.sample(
             #     set(getReversePopularItemId(int((1 - popularThreshold) * itemNum))),
             #     targetNum)
+        elif arg.attackTargetChooseWay == "designated":
+            if not arg.targetASINs:
+                raise ValueError("Specific ASINs must be provided when attackTargetChooseWay is 'designated'")
+            
+            # Load mapping from item_list.txt if it exists
+            mapping_path = os.path.join(data.dataset_path, "item_list.txt")
+            asin2id = {}
+            if os.path.exists(mapping_path):
+                with open(mapping_path, 'r') as f:
+                    next(f) # skip header
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            asin2id[parts[0]] = parts[1]
+            
+            targetItem_names = [asin.strip() for asin in arg.targetASINs.split(",")]
+            targetItem = []
+            for name in targetItem_names:
+                # Check if it's an ASIN that we can map to a remapped ID
+                remapped_id = asin2id.get(name)
+                # remapped_id is the string ID used in train.txt (e.g. '1603')
+                if remapped_id and remapped_id in data.item:
+                    targetItem.append(data.item[remapped_id])
+                elif name in data.item:
+                    # If user provided remapped ID directly
+                    targetItem.append(data.item[name])
+                else:
+                    print(f"Warning: Designated item '{name}' not found in dataset. Skipping.")
+            
+            if len(targetItem) == 0:
+                 raise ValueError(f"None of the designated items {targetItem_names} were found in the dataset.")
+            
         targetItem = [data.id2item[i] for i in targetItem]
         with open(path, 'w') as f:
             f.writelines(str(targetItem).replace('[', '').replace(']', ''))

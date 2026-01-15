@@ -5,7 +5,7 @@ def attack_parse_args():
 
     # ===== Genneral parameters ===== #
     parser.add_argument('--attackCategory', type=str, default="Black", metavar='N',help='["Black","Gray", "White"]')
-    parser.add_argument('--attackModelName', type=str, default="RandomAttack", metavar='N',help='[RandomAttack, BandwagonAttack,FedRecAttack,A_ra,CLeaR ...]')
+    parser.add_argument('--attackModelName', type=str, default="NoneAttack", metavar='N',help='[RandomAttack, BandwagonAttack,FedRecAttack,A_ra,CLeaR ...]')
 
     parser.add_argument('--times', type=int, default=5, metavar='N', help='the times of attack experiment')
     parser.add_argument('--poisonDatasetOutPath', type=str, default="data/poison/", metavar='N', help='the poisoning data sava path after attack.')
@@ -33,9 +33,11 @@ def attack_parse_args():
 
     # ===== If attack type is target, the following parameters are necessary ===== #
     parser.add_argument('--attackTargetChooseWay', type=str, default="unpopular", metavar='N',
-                        choices=["random", "popular", "unpopular"],
+                        choices=["random", "popular", "unpopular", "designated"],
                         help='Target attack selection mode')
+    parser.add_argument('--targetASINs', type=str, default="", metavar='N',
+                        help='Specific ASINs for designated attack, separated by comma. e.g. "B000064841,B000064842"')
     parser.add_argument('--targetSize', type=float, default=5, metavar='N',
                         help='proportion of targetItem, ratio if value is float,number if value is int')
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     return args

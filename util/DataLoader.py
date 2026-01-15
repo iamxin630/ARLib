@@ -11,6 +11,7 @@ class DataLoader():
         self.test_data = FileIO.load_data_set(args.data_path + args.dataset + args.test_data)
 
         self.dataName=args.dataset
+        self.dataset_path = args.data_path + args.dataset + "/"
         self.user = {}
         self.item = {}
         self.id2user = {}
