@@ -31,60 +31,48 @@ class RecommendMetric(object):
         return hit_num/total_num
 
     @staticmethod
-    def hit_ratio_candidate(origin, model, data, N, num_negatives=99):
+    def hit_ratio_candidate(origin, model, data, N):
         """
-        Note: Candidate Pool (1+99) Hit Ratio.
+        Note: Global Scoring Hit Ratio (Leave-One-Out).
         Calculates the average hit rate across all users in the test set.
-        For each user: 1 positive (from test) + 99 random negatives.
+        For each user: 1 positive (from test) ranked against all items except history.
         """
         hit_counts = {n: 0 for n in N}
         total_users = 0
-        # Get all item IDs
-        all_item_ids = list(range(len(data.item))) # 取得系統中所有物品 ID
         
         for user_name in origin:
             if user_name not in data.user:
                 continue
             
             # 1. Positive item (Leave-One-Out: taking the first item in test set)
-            test_items = list(origin[user_name].keys()) # 取出該用戶在測試集的物品
+            test_items = list(origin[user_name].keys())
             if not test_items:
                 continue
-            pos_item_name = test_items[0] # 取出該用戶在測試集的第一個物品
+            pos_item_name = test_items[0]
             if pos_item_name not in data.item:
                 continue
-            pos_item_id = data.item[pos_item_name] # 轉換為物品 ID
+            pos_item_id = data.item[pos_item_name]
             
-            # 2. History to exclude (Train + Val + Test) 
-            # 加入訓練集 (Train) 歷史
+            # 2. History to exclude (Train + Val + Test)
             history = set([data.item[i] for i in data.training_set_u[user_name] if i in data.item])
-            # 加入驗證集 (Valid) 歷史
             if user_name in data.val_set:
                 history.update([data.item[i] for i in data.val_set[user_name] if i in data.item])
-            # 加入測試集 (Test) 本身 (確保不會採樣到正樣本)
             history.update([data.item[i] for i in origin[user_name] if i in data.item])
             
-            # 3. Sample 99 negatives
-            # 從「所有物品」中扣除「歷史看過的物品」
-            available_negatives = list(set(all_item_ids) - history)
-            if len(available_negatives) < num_negatives:
-                sampled_negatives = available_negatives
-            else:
-                # 隨機抽取 99 個
-                sampled_negatives = random.sample(available_negatives, num_negatives)
-            # 建立候選池
-            candidate_pool = [pos_item_id] + sampled_negatives
+            # Masking: remove the positive item from history to keep it in candidate pool
+            history.discard(pos_item_id)
             
-            # 4. Get scores for candidates
+            # 3. Global Scoring
             # 讓模型預測該用戶對「所有物品」的分數
             scores = model.predict(user_name)
-            # 只把候選池中這 100 個物品的分數抓出來
-            pool_scores = scores[candidate_pool]
+            
+            # 4. History Masking: set history items' scores to -inf
+            scores[list(history)] = -np.inf
             
             # 5. Rank (higher score is better)
-            pos_score = pool_scores[0]
+            pos_score = scores[pos_item_id]
             # rank = 1 + number of items with score > pos_score
-            rank = (pool_scores > pos_score).sum() + 1
+            rank = (scores > pos_score).sum() + 1
             
             # 更新命中計數
             total_users += 1
@@ -272,53 +260,70 @@ class AttackMetric(object):
             result.append(hit[i] / totalNum[i])
         return result
 
-    def exposure_ratio_candidate(self, num_negatives=99):
+    def exposure_ratio_candidate(self):
         """
-        Calculates Exposure Ratio (ER) using a 1+99 candidate pool.
-        (1 target item + 99 random negative items)
+        Calculates Exposure Ratio (ER) using global ranking.
         """
         hit_counts = {n: 0 for n in self.top}
         total_users = 0
+
+        used = 0
+        skipped = 0
         data = self.recommendModel.data
-        all_item_ids = list(range(len(data.item)))
-        
-        # self.targetItem should already be a list of internal IDs
-        target_item_id = self.targetItem[0]
+        all_item_ids = list(data.item.values())
+
+        # ✅ 固定攻擊目標（internal item id）
+        assert isinstance(self.targetItem, (list, tuple)) and len(self.targetItem) > 0
+        target_item_id = int(self.targetItem[0])
+
 
         for user_name in data.test_set: # Evaluate on test set users to have consistent history exclusion
             if user_name not in data.user:
                 continue
-            
-            # History to exclude (Train + Val + Test)
-            history = set([data.item[i] for i in data.training_set_u[user_name] if i in data.item])
+
+            # ===== 1. build full interaction history =====
+            history = set(
+                data.item[i]
+                for i in data.training_set_u.get(user_name, [])
+                if i in data.item
+            )
+
             if user_name in data.val_set:
-                history.update([data.item[i] for i in data.val_set[user_name] if i in data.item])
-            history.update([data.item[i] for i in data.test_set[user_name] if i in data.item])
-            
-            # Ensure target item is not excluded even if it's in history
-            history.discard(target_item_id)
-            
-            # Sample negatives (excluding history and target item)
-            available_negatives = list(set(all_item_ids) - history - {target_item_id})
-            if len(available_negatives) < num_negatives:
-                sampled_negatives = available_negatives
-            else:
-                sampled_negatives = random.sample(available_negatives, num_negatives)
-            
-            candidate_pool = [target_item_id] + sampled_negatives
-            
-            # Scores for candidate pool
+                history.update(
+                    data.item[i]
+                    for i in data.val_set[user_name]
+                    if i in data.item
+                )
+
+            history.update(
+                data.item[i]
+                for i in data.test_set[user_name]
+                if i in data.item
+            )
+
+            # ===== 2. ONLY evaluate users who NEVER interacted with target =====
+            if target_item_id in history:
+                skipped += 1
+                continue
+
+            used += 1
+
+            # ===== 3. Global Scoring =====
             scores = self.recommendModel.predict(user_name)
-            pool_scores = scores[candidate_pool]
+
+            # ===== 4. History Masking: set history items' scores to -inf =====
+            # Note: target_item_id is already guaranteed NOT in history
+            scores[list(history)] = -np.inf
             
             # Rank
-            target_score = pool_scores[0]
-            rank = (pool_scores > target_score).sum() + 1
+            target_score = scores[target_item_id]
+            rank = (scores > target_score).sum() + 1
             
             total_users += 1
             for n in self.top:
                 if rank <= n:
                     hit_counts[n] += 1
-                    
+
+        print(f"[ER] used={used}, skipped={skipped}, total_test_users={len(data.test_set)}")        
         results = [hit_counts[n] / total_users if total_users > 0 else 0 for n in self.top]
         return results

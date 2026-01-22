@@ -5,7 +5,7 @@ def attack_parse_args():
 
     # ===== Genneral parameters ===== #
     parser.add_argument('--attackCategory', type=str, default="Black", metavar='N',help='["Black","Gray", "White"]')
-    parser.add_argument('--attackModelName', type=str, default="NoneAttack", metavar='N',help='[RandomAttack, BandwagonAttack,FedRecAttack,A_ra,CLeaR ...]')
+    parser.add_argument('--attackModelName', type=str, default="RandomAttack", metavar='N',help='[RandomAttack, BandwagonAttack,FedRecAttack,A_ra,CLeaR ...]')
 
     parser.add_argument('--times', type=int, default=5, metavar='N', help='the times of attack experiment')
     parser.add_argument('--poisonDatasetOutPath', type=str, default="data/poison/", metavar='N', help='the poisoning data sava path after attack.')
@@ -14,7 +14,7 @@ def attack_parse_args():
     # ===== Limitation parameters ===== #
     parser.add_argument('--maliciousUserSize', type=float, default="0.01", metavar='N',
                         help='proportion/number of users. proportion if value is float (0.01, 0.1), number if value is int (5, 10).')
-    parser.add_argument('--maliciousFeedbackSize', type=float, default=0, metavar='N',
+    parser.add_argument('--maliciousFeedbackSize', type=float, default=1, metavar='N',
                         help='the feedback number of each user. If value is 0, the number of feedback is the average of real users.')
 
     # ===== Bi-level attack parameters ===== #

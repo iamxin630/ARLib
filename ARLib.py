@@ -160,11 +160,13 @@ class ARLib():
             # recommender test result in clean data
             _, self.rawRecommendresult = self.recommendModel.test()
 
-            # Calculate additional candidate pool metrics
+            # Calculate additional metrics with global ranking
             cand_hr = RecommendMetric.hit_ratio_candidate(self.recommendModel.data.test_set, self.recommendModel, self.recommendModel.data, self.top)
             attackmetrics = AttackMetric(self.recommendModel, self.targetItem, self.top)
             cand_er_list = attackmetrics.exposure_ratio_candidate()
-            cand_er = {self.top[i]: cand_er_list[i] for i in range(len(self.top))}
+            # cand_er = {self.top[i]: cand_er_list[i] for i in range(len(self.top))}
+            cand_er = dict(zip(self.top, cand_er_list))
+
 
             # Insert into results
             new_results = []
@@ -175,9 +177,9 @@ class ARLib():
                     curr_top = int(r.split(' ')[1])
                 elif r.startswith('Hit Ratio:') and curr_top is not None:
                     if curr_top in cand_hr:
-                        new_results.append(f'Hit Ratio (1+99):{cand_hr[curr_top]}\n')
+                        new_results.append(f'Hit Ratio (Global):{cand_hr[curr_top]}\n')
                     if curr_top in cand_er:
-                        new_results.append(f'Exposure Ratio (1+99):{cand_er[curr_top]}\n')
+                        new_results.append(f'Exposure Ratio (Global):{cand_er[curr_top]}\n')
             self.rawRecommendresult = new_results
 
             message = "Recommender model {} is tested in clean data".format(self.recommendModelName)
@@ -191,11 +193,14 @@ class ARLib():
             # recommender test result in poison data
             _, self.attackRecommendresult = self.recommendModel.test()
 
-            # Calculate additional candidate pool metrics
+            # Calculate additional metrics with global ranking
             cand_hr = RecommendMetric.hit_ratio_candidate(self.recommendModel.data.test_set, self.recommendModel, self.recommendModel.data, self.top)
             attackmetrics = AttackMetric(self.recommendModel, self.targetItem, self.top)
             cand_er_list = attackmetrics.exposure_ratio_candidate()
-            cand_er = {self.top[i]: cand_er_list[i] for i in range(len(self.top))}
+
+            # cand_er = {self.top[i]: cand_er_list[i] for i in range(len(self.top))}
+            cand_er = dict(zip(self.top, cand_er_list))
+
 
             # Insert into results
             new_results = []
@@ -206,9 +211,9 @@ class ARLib():
                     curr_top = int(r.split(' ')[1])
                 elif r.startswith('Hit Ratio:') and curr_top is not None:
                     if curr_top in cand_hr:
-                        new_results.append(f'Hit Ratio (1+99):{cand_hr[curr_top]}\n')
+                        new_results.append(f'Hit Ratio (Global):{cand_hr[curr_top]}\n')
                     if curr_top in cand_er:
-                        new_results.append(f'Exposure Ratio (1+99):{cand_er[curr_top]}\n')
+                        new_results.append(f'Exposure Ratio (Global):{cand_er[curr_top]}\n')
             self.attackRecommendresult = new_results
 
             self.result.append(dict())
@@ -243,8 +248,8 @@ class ARLib():
             for i, j in enumerate(self.top):
                 result["Top " + str(j)] = dict()
                 result["Top " + str(j)]["HitRate"] = self.hitRate[-1][i]
-                result["Top " + str(j)]["Hit Ratio (1+99)"] = self.cand_hr[-1][i]
-                result["Top " + str(j)]["Exposure Ratio (1+99)"] = self.cand_er[-1][i]
+                result["Top " + str(j)]["Hit Ratio (Global)"] = self.cand_hr[-1][i]
+                result["Top " + str(j)]["Exposure Ratio (Global)"] = self.cand_er[-1][i]
                 result["Top " + str(j)]["Precision"] = self.precision[-1][i]
                 result["Top " + str(j)]["Recall"] = self.recall[-1][i]
                 result["Top " + str(j)]["NDCG"] = self.ndcg[-1][i]
@@ -377,8 +382,8 @@ class ARLib():
         for i, j in enumerate(self.top):
             result["Top " + str(j)] = dict()
             result["Top " + str(j)]["HitRate"] = self.avgHitRateAttack[i]
-            result["Top " + str(j)]["Hit Ratio (1+99)"] = self.avgCandHRAttack[i]
-            result["Top " + str(j)]["Exposure Ratio (1+99)"] = self.avgCandERAttack[i]
+            result["Top " + str(j)]["Hit Ratio (Global)"] = self.avgCandHRAttack[i]
+            result["Top " + str(j)]["Exposure Ratio (Global)"] = self.avgCandERAttack[i]
             result["Top " + str(j)]["Precision"] = self.avgPrecisionAttack[i]
             result["Top " + str(j)]["Recall"] = self.avgRecallAttack[i]
             result["Top " + str(j)]["NDCG"] = self.avgNDCGAttack[i]

@@ -124,7 +124,7 @@ def process_cross_domain():
     common_users = source_users.intersection(target_users)
     print(f"   Common Users count: {len(common_users)}")
 
-    # 只保留 Target Domain 中，屬於交疊用戶的資料
+    # # 只保留 Target Domain 中，屬於交疊用戶的資料
     df_target = df_target[df_target["user"].isin(common_users)]
     print(f"   Target records after overlap filtering: {len(df_target)}")
 
@@ -207,8 +207,30 @@ def process_cross_domain():
         # 剩下的 (0 到 -3) 是 Train
         train_data.extend(interactions[:-2])
 
-    # === Step 6: 寫入檔案 ===
-    print(f"=== Step 6: Writing to {OUTPUT_DIR} ===")
+    # === Step 6: 驗證 Test Set 唯一性 ===
+    print("=== Step 6: Validating Test Set Uniqueness ===")
+    
+    # 建立用戶歷史集合 (User, Item)
+    train_val_history = set()
+    for row in train_data:
+        train_val_history.add((int(row[0]), int(row[1])))
+    for row in val_data:
+        train_val_history.add((int(row[0]), int(row[1])))
+    
+    # 檢查 Test Set 是否有重複出現於歷史中
+    has_overlap = False
+    for row in test_data:
+        if (int(row[0]), int(row[1])) in train_val_history:
+            has_overlap = True
+            break
+    
+    if has_overlap:
+        print("Test items overlap with Train/Val: no")
+    else:
+        print("Test items overlap with Train/Val: yes (Clean Split)")
+
+    # === Step 7: 寫入檔案 ===
+    print(f"=== Step 7: Writing to {OUTPUT_DIR} ===")
     
     def write_txt(filename, data_list):
         path = os.path.join(OUTPUT_DIR, filename)

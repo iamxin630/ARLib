@@ -38,11 +38,19 @@ def dataSave(ratings, fileName, id2user, id2item):
     #         ratingList.append((i, j, ratings[i,j]))
     text = []
     for i in ratingList:
-        if i[0] in id2user.keys():
+        if i[0] in id2user:
             userId = id2user[i[0]]
         else:
             userId = "fakeUser" + str(i[0])
-        itemId = id2item[i[1]]
+        
+        if i[1] in id2item:
+            itemId = id2item[i[1]]
+        else:
+            print(f"Error: Item index {i[1]} not found in id2item mapping.")
+            print(f"id2item size: {len(id2item)}")
+            print(f"Max id2item key: {max(id2item.keys()) if id2item else 'N/A'}")
+            raise KeyError(f"Item index {i[1]} is out of bounds for id2item (size {len(id2item)})")
+            
         new_line = '{} {} {}'.format(userId, itemId, i[2]) + '\n'
         text.append(new_line)
     with open(fileName, 'w') as f:

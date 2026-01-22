@@ -68,10 +68,8 @@ class RandomAttack(ShillingAttackModel):
         uNum = self.fakeUserNum
         row, col, entries = [], [], []
         for i in range(uNum):
-            # fillerItemid = random.sample(set(range(self.itemNum)) - set(self.targetItem),
-            #                              self.maliciousFeedbackNum - len(self.targetItem))
             fillerItemid = random.sample(set(range(self.itemNum)) - set(self.targetItem),
-                                self.maliciousFeedbackNum)
+                                         self.maliciousFeedbackNum - len(self.targetItem))
             row += [i for r in range(len(fillerItemid + self.targetItem))]
             col += fillerItemid + self.targetItem
             entries += [1 for r in range(len(fillerItemid + self.targetItem))]
