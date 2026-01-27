@@ -96,6 +96,9 @@ def get_df(path):
     return pd.DataFrame.from_dict(df, orient='index')
 
 def process_cross_domain():
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+    
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
@@ -105,77 +108,108 @@ def process_cross_domain():
     # 1.1 載入 Source Domain
     print(f"   Loading Source: {SOURCE_CATEGORY} ...")
     source_path = download_dataset(SOURCE_CATEGORY, RAW_DIR)
-    df_source = get_df(source_path)[['reviewerID']] # Source 只需要 User ID 來做交集
-    df_source.columns = ["user"]
+    df_source = get_df(source_path)[['reviewerID', 'asin', 'overall', 'unixReviewTime']]
+    df_source.columns = ["user", "item", "rating", "timestamp"]
+    df_source["is_target"] = 0
     
     # 1.2 載入 Target Domain (我們要主要處理的資料)
     print(f"   Loading Target: {TARGET_CATEGORY} ...")
     target_path = download_dataset(TARGET_CATEGORY, RAW_DIR)
     df_target = get_df(target_path)[['reviewerID', 'asin', 'overall', 'unixReviewTime']]
     df_target.columns = ["user", "item", "rating", "timestamp"]
+    df_target["is_target"] = 1
 
-    print(f"   Original Source users: {len(df_source['user'].unique())}")
+    print(f"   Original Source records: {len(df_source)}")
     print(f"   Original Target records: {len(df_target)}")
 
-    # === Step 2: 找出交疊用戶 (Cross-Domain Constraint) ===
-    print(f"=== Step 2: Finding Overlapping Users ===")
-    
+    # === Step 2: 找出跨域交疊用戶 ===
+    print(f"=== Step 2: Finding Common Users ===")
     source_users = set(df_source["user"].unique())
     target_users = set(df_target["user"].unique())
-    
     common_users = source_users.intersection(target_users)
     print(f"   Common Users count: {len(common_users)}")
 
-    # # 只保留 Target Domain 中，屬於交疊用戶的資料
-    df_target = df_target[df_target["user"].isin(common_users)]
-    print(f"   Target records after overlap filtering: {len(df_target)}")
+    df = pd.concat([df_source, df_target])
+    df = df[df["user"].isin(common_users)]
+    df.sort_values(by="timestamp", inplace=True)
+    df.reset_index(drop=True, inplace=True)
 
-    # === Step 3: 基本過濾 (Rating & Min Interactions) ===
-    print(f"=== Step 3: Filtering Target Data ===")
+    # === Step 3: 防止時間洩漏 (Time Leakage Prevention) ===
+    print(f"=== Step 3: Filtering Time Leakage ===")
+    target_df_pre = df[df["is_target"] == 1]
+    training_time = dict()
+    
+    # 找出各用戶在 Target Domain 的倒數第二筆時間 (-2)
+    for user, group in target_df_pre.groupby("user"):
+        if len(group) >= 2:
+            training_time[user] = group["timestamp"].values[-2]
+        else:
+            training_time[user] = -1
 
-    # 3.1 評分過濾
-    if RATING_THRESHOLD > 0:
-        df_target = df_target[df_target["rating"] > RATING_THRESHOLD]
+    remove_index = []
+    source_df_pre = df[df["is_target"] == 0]
+    for user, group in source_df_pre.groupby("user"):
+        if user in training_time and training_time[user] != -1:
+            # 移除在 Source Domain 中，時間 >= Target Domain 訓練終點的資料
+            indexs = group[group["timestamp"] >= training_time[user]].index
+            remove_index.extend(indexs)
+    
+    df.drop(remove_index, axis=0, inplace=True)
+    df.reset_index(drop=True, inplace=True)
 
-    # 3.2 遞迴過濾 (確保 User >= 3 且 Item >= 7)
-    print(f"   Starting iterative filtering: User >= {MIN_INTERACTIONS}, Item >= {ITEM_MIN_INTERACTIONS}")
+    # === Step 4: 遞迴過濾 (Iterative Filtering) ===
+    print(f"=== Step 4: Iterative Filtering (Item >= 7, Target User >= 3, Source User >= 1) ===")
+    iteration = 0
     while True:
-        prev_count = len(df_target)
+        iteration += 1
+        before_count = len(df)
         
-        # 過濾物品 (Item interaction >= 7)
-        item_counts = df_target["item"].value_counts()
-        valid_items = item_counts[item_counts >= ITEM_MIN_INTERACTIONS].index
-        df_target = df_target[df_target["item"].isin(valid_items)]
+        # 1. 物品過濾 (各個領域至少有 7 次互動)
+        s_item_counts = df[df["is_target"] == 0]["item"].value_counts()
+        t_item_counts = df[df["is_target"] == 1]["item"].value_counts()
+        keep_s_items = s_item_counts[s_item_counts >= 7].index
+        keep_t_items = t_item_counts[t_item_counts >= 7].index
         
-        # 過濾用戶 (Target domain interaction >= 3)
-        user_counts = df_target["user"].value_counts()
-        valid_users = user_counts[user_counts >= MIN_INTERACTIONS].index
-        df_target = df_target[df_target["user"].isin(valid_users)]
+        df = df[
+            ((df["is_target"] == 0) & (df["item"].isin(keep_s_items))) |
+            ((df["is_target"] == 1) & (df["item"].isin(keep_t_items)))
+        ]
         
-        if len(df_target) == prev_count:
+        # 2. 用戶過濾 (Target >= 3 用於 Train/Val/Test 切分, Source >= 1)
+        u_counts_t = df[df["is_target"] == 1]["user"].value_counts()
+        u_counts_s = df[df["is_target"] == 0]["user"].value_counts()
+        valid_u = u_counts_t[u_counts_t >= 3].index.intersection(u_counts_s[u_counts_s >= 1].index)
+        
+        df = df[df["user"].isin(valid_u)]
+        
+        after_count = len(df)
+        print(f"   Filter Iteration {iteration}: {before_count} -> {after_count}")
+        
+        if before_count == after_count:
             break
-    
-    print(f"   Records after Filtering: {len(df_target)}")
-    print(f"   Final Valid Users: {len(df_target['user'].unique())}")
-    print(f"   Final Valid Items: {len(df_target['item'].unique())}")
 
-    # === Step 4: 排序與 ID 重編 ===
-    print("=== Step 4: Sorting and Remapping IDs ===")
+    if len(df) == 0:
+        raise ValueError("Empty dataset after filtering.")
+
+    # 最終導出：只需要 Target Domain 資料
+    print(f"=== Step 5: Exporting Target Domain Only ===")
+    df_export = df[df["is_target"] == 1].copy()
+
+    # === Step 6: 排序與 ID 重編 ===
+    print("=== Step 6: Sorting and Remapping IDs ===")
     
-    # 依時間排序 (這是 Time-aware split 的關鍵)
-    df_target.sort_values(by=["user", "timestamp"], inplace=True)
-    df_target.reset_index(drop=True, inplace=True)
+    df_export.sort_values(by=["user", "timestamp"], inplace=True)
+    df_export.reset_index(drop=True, inplace=True)
 
     # User ID Mapping
-    # 注意：這裡重新編號後，ID 0 ~ N-1 都是交疊且符合條件的用戶
-    user_ids = df_target["user"].unique()
+    user_ids = df_export["user"].unique()
     user2idx = {u: i for i, u in enumerate(user_ids)}
-    df_target["user"] = df_target["user"].map(user2idx)
+    df_export["user"] = df_export["user"].map(user2idx)
     
     # Item ID Mapping
-    item_ids = df_target["item"].unique()
+    item_ids = df_export["item"].unique()
     item2idx = {item: i for i, item in enumerate(item_ids)} 
-    df_target["item"] = df_target["item"].map(item2idx)
+    df_export["item"] = df_export["item"].map(item2idx)
 
     print(f"   Total Users: {len(user_ids)}")
     print(f"   Total Items: {len(item_ids)}")
@@ -191,67 +225,32 @@ def process_cross_domain():
         for org_id, remap_id in user2idx.items():
             f.write(f"{org_id} {remap_id}\n")
 
-    # === Step 5: 資料分割 (Time-Aware Split) ===
-    print("=== Step 5: Splitting Data (Train/Val/Test) ===")
+    # === Step 7: 資料分割 (Time-Aware Split) ===
+    print("=== Step 7: Splitting Data (Train/Val/Test) ===")
     
     train_data = []
     val_data = []
     test_data = []
 
-    # 這裡使用 Groupby 加速處理
-    # 邏輯：最後一筆 -> Test, 倒數第二筆 -> Val, 其餘 -> Train
-    
-    grouped = df_target.groupby("user")
+    grouped = df_export.groupby("user")
     
     for user_id, group in grouped:
-        # 轉成 list 方便操作: [user, item, rating]
         interactions = group[['user', 'item', 'rating']].values.tolist()
         
-        # 即使前面過濾過，保險起見再檢查一次長度
-        if len(interactions) < MIN_INTERACTIONS:
-            # 如果少於 MIN_INTERACTIONS 筆，全部放進 Train (或是您可以選擇丟棄)
-            train_data.extend(interactions)
-            continue
-            
         # 最後一筆是 Test
         test_data.append(interactions[-1])
-        
         # 倒數第二筆是 Val
         val_data.append(interactions[-2])
-        
-        # 剩下的 (0 到 -3) 是 Train
+        # 其餘是 Train
         train_data.extend(interactions[:-2])
 
-    # === Step 6: 驗證 Test Set 唯一性 ===
-    print("=== Step 6: Validating Test Set Uniqueness ===")
-    
-    # 建立用戶歷史集合 (User, Item)
-    train_val_history = set()
-    for row in train_data:
-        train_val_history.add((int(row[0]), int(row[1])))
-    for row in val_data:
-        train_val_history.add((int(row[0]), int(row[1])))
-    
-    # 檢查 Test Set 是否有重複出現於歷史中
-    has_overlap = False
-    for row in test_data:
-        if (int(row[0]), int(row[1])) in train_val_history:
-            has_overlap = True
-            break
-    
-    if has_overlap:
-        print("Test items overlap with Train/Val: no")
-    else:
-        print("Test items overlap with Train/Val: yes (Clean Split)")
-
-    # === Step 7: 寫入檔案 ===
-    print(f"=== Step 7: Writing to {OUTPUT_DIR} ===")
+    # === Step 8: 寫入檔案 ===
+    print(f"=== Step 8: Writing to {OUTPUT_DIR} ===")
     
     def write_txt(filename, data_list):
         path = os.path.join(OUTPUT_DIR, filename)
         with open(path, 'w') as f:
             for line in data_list:
-                # 確保轉成 int 寫入，去除小數點
                 f.write(f"{int(line[0])} {int(line[1])} {int(line[2])}\n")
     
     write_txt("train.txt", train_data)
