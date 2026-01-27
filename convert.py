@@ -8,8 +8,8 @@ import numpy as np
 # ================= 參數設定區 =================
 
 # 1. [設定領域]
-SOURCE_CATEGORY = "CD"       # 來源領域 (用來過濾用戶)
-TARGET_CATEGORY = "Kitchen"  # 目標領域 (我們要產出的資料)
+SOURCE_CATEGORY = "Book"       # 來源領域 (用來過濾用戶)
+TARGET_CATEGORY = "Electronic"  # 目標領域 (我們要產出的資料)
 
 # 2. [檔案路徑]
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,8 +18,8 @@ RAW_DIR = os.path.join(BASE_DIR, "data/raw")
 OUTPUT_DIR = os.path.join(BASE_DIR, f"data/clean/{SOURCE_CATEGORY}_{TARGET_CATEGORY}/")
 
 # 3. [過濾設定]
-MIN_INTERACTIONS = 3    # Target Domain 中，互動數少於此值的用戶會被剔除 (為了切分 Train/Val/Test)
-ITEM_MIN_INTERACTIONS = 0 # 每個物品至少有 7 次互動
+MIN_INTERACTIONS = 2    # Target Domain 中，互動數要求 (對齊另一專案: Target >= 2)
+ITEM_MIN_INTERACTIONS = 7 # 每個物品至少互動次數 (對齊另一專案: Item >= 7)
 RATING_THRESHOLD = 0    # 評分過濾 (0 代表保留所有)
 
 # ============================================
@@ -158,27 +158,27 @@ def process_cross_domain():
     df.reset_index(drop=True, inplace=True)
 
     # === Step 4: 遞迴過濾 (Iterative Filtering) ===
-    print(f"=== Step 4: Iterative Filtering (Item >= 7, Target User >= 3, Source User >= 1) ===")
+    print(f"=== Step 4: Iterative Filtering (Item >= {ITEM_MIN_INTERACTIONS}, Target User >= {MIN_INTERACTIONS}, Source User >= 1) ===")
     iteration = 0
     while True:
         iteration += 1
         before_count = len(df)
         
-        # 1. 物品過濾 (各個領域至少有 7 次互動)
+        # 1. 物品過濾 (使用 ITEM_MIN_INTERACTIONS 設定)
         s_item_counts = df[df["is_target"] == 0]["item"].value_counts()
         t_item_counts = df[df["is_target"] == 1]["item"].value_counts()
-        keep_s_items = s_item_counts[s_item_counts >= 7].index
-        keep_t_items = t_item_counts[t_item_counts >= 7].index
+        keep_s_items = s_item_counts[s_item_counts >= ITEM_MIN_INTERACTIONS].index
+        keep_t_items = t_item_counts[t_item_counts >= ITEM_MIN_INTERACTIONS].index
         
         df = df[
             ((df["is_target"] == 0) & (df["item"].isin(keep_s_items))) |
             ((df["is_target"] == 1) & (df["item"].isin(keep_t_items)))
         ]
         
-        # 2. 用戶過濾 (Target >= 3 用於 Train/Val/Test 切分, Source >= 1)
+        # 2. 用戶過濾 (使用 MIN_INTERACTIONS 設定)
         u_counts_t = df[df["is_target"] == 1]["user"].value_counts()
         u_counts_s = df[df["is_target"] == 0]["user"].value_counts()
-        valid_u = u_counts_t[u_counts_t >= 3].index.intersection(u_counts_s[u_counts_s >= 1].index)
+        valid_u = u_counts_t[u_counts_t >= MIN_INTERACTIONS].index.intersection(u_counts_s[u_counts_s >= 1].index)
         
         df = df[df["user"].isin(valid_u)]
         
