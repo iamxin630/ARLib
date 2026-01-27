@@ -44,7 +44,7 @@ class GTA():
         elif self.maliciousFeedbackSize >= 1:
             self.maliciousFeedbackNum = self.maliciousFeedbackSize
         else:
-            self.maliciousFeedbackNum = int(self.maliciousFeedbackSize * self.item_num)
+            self.maliciousFeedbackNum = int(self.maliciousFeedbackSize * self.itemNum)
 
         if self.maliciousUserSize < 1:
             self.fakeUserNum = int(data.user_num * self.maliciousUserSize)
@@ -62,13 +62,13 @@ class GTA():
         recommender.train(Epoch=self.innerEpoch, optimizer=optimizer, evalNum=5)
         topk = min(recommender.topN)
         bestTargetHitRate = -1
-        seedItem = random.sample(getPopularItemId(recommend.data.matrix(),self.itemNum//5).tolist()[0],self.maliciousFeedbackNum//2)
+        seedItem = random.sample(getPopularItemId(recommend.data.matrix(), recommender.data.item_num//5).tolist()[0], self.maliciousFeedbackNum//2)
         for epoch in range(self.Epoch):
             # inner optimization
-            ui_adj = sp.csr_matrix(([], ([], [])), shape=(
-                self.userNum + self.fakeUserNum + self.itemNum, self.userNum + self.fakeUserNum + self.itemNum),
-                                   dtype=np.float32)
-            ui_adj[:self.userNum + self.fakeUserNum, self.userNum + self.fakeUserNum:] = uiAdj
+            u_dim, i_dim = uiAdj.shape
+            ui_adj = sp.lil_matrix((u_dim + i_dim, u_dim + i_dim), dtype=np.float32)
+            ui_adj[:u_dim, u_dim:] = uiAdj
+            ui_adj = ui_adj.tocsr()
 
             recommender.model._init_uiAdj(ui_adj + ui_adj.T)
             recommender.train(Epoch=self.innerEpoch, optimizer=optimizer, evalNum=5)
@@ -121,7 +121,7 @@ class GTA():
         self.fakeUser = list(range(self.userNum, self.userNum + self.fakeUserNum))
         row, col, entries = [], [], []
         for u in self.fakeUser:
-            sampleItem =  random.sample(set(list(range(self.itemNum))),self.maliciousFeedbackNum)
+            sampleItem = random.sample(set(list(range(recommender.data.item_num))), self.maliciousFeedbackNum)
             for i in sampleItem:
                 recommender.data.training_data.append((recommender.data.id2user[u],recommender.data.id2item[i]))
         for pair in recommender.data.training_data:
@@ -135,10 +135,11 @@ class GTA():
 
         recommender.__init__(recommender.args, recommender.data, self.targetItem)
         # recommender.model = recommender.model.cuda()
-        ui_adj = sp.csr_matrix(([], ([], [])), shape=(
-            self.userNum + self.fakeUserNum + self.itemNum, self.userNum + self.fakeUserNum + self.itemNum),
-                                dtype=np.float32)
-        ui_adj[:self.userNum + self.fakeUserNum, self.userNum + self.fakeUserNum:] = recommender.data.matrix()
+        mat = recommender.data.matrix()
+        u_dim, i_dim = mat.shape
+        ui_adj = sp.lil_matrix((u_dim + i_dim, u_dim + i_dim), dtype=np.float32)
+        ui_adj[:u_dim, u_dim:] = mat
+        ui_adj = ui_adj.tocsr()
         recommender.model._init_uiAdj(ui_adj + ui_adj.T)
         recommender.train(Epoch=30)
 

@@ -24,7 +24,7 @@ def recommend_parse_args():
     parser.add_argument("--cuda", type=bool, default=True, help="use gpu or not")
     parser.add_argument("--gpu_id", type=str, default='0', help="gpu id")
     parser.add_argument('--seed', nargs='?', default=2018, help='random seed')
-    parser.add_argument('--topK', nargs='?', default='10', help='topK')
+    parser.add_argument('--topK', nargs='?', default='20', help='topK')
 
     # ===== save model ===== #
     parser.add_argument("--load", type=bool, default=True, help="load existed model or not")

@@ -12,12 +12,14 @@ SOURCE_CATEGORY = "CD"       # 來源領域 (用來過濾用戶)
 TARGET_CATEGORY = "Kitchen"  # 目標領域 (我們要產出的資料)
 
 # 2. [檔案路徑]
-RAW_DIR = "/mnt/sda1/sherry/BiGNAS/SGL-BiGNAS-xin/ARLib/data/raw"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RAW_DIR = os.path.join(BASE_DIR, "data/raw")
 # 輸出路徑建議包含兩個領域名稱，方便辨識
-OUTPUT_DIR = f"data/clean/{SOURCE_CATEGORY}_{TARGET_CATEGORY}/"
+OUTPUT_DIR = os.path.join(BASE_DIR, f"data/clean/{SOURCE_CATEGORY}_{TARGET_CATEGORY}/")
 
 # 3. [過濾設定]
 MIN_INTERACTIONS = 3    # Target Domain 中，互動數少於此值的用戶會被剔除 (為了切分 Train/Val/Test)
+ITEM_MIN_INTERACTIONS = 0 # 每個物品至少有 7 次互動
 RATING_THRESHOLD = 0    # 評分過濾 (0 代表保留所有)
 
 # ============================================
@@ -135,14 +137,27 @@ def process_cross_domain():
     if RATING_THRESHOLD > 0:
         df_target = df_target[df_target["rating"] > RATING_THRESHOLD]
 
-    # 3.2 互動數過濾 (確保每個用戶在 Target Domain 至少有 MIN_INTERACTIONS 筆資料)
-    # 注意：雖然是用戶交疊了，但如果他在 Target Domain 只有 1 筆資料，還是無法切分成 Train/Val/Test
-    user_counts = df_target["user"].value_counts()
-    valid_users = user_counts[user_counts >= MIN_INTERACTIONS].index
-    df_target = df_target[df_target["user"].isin(valid_users)]
+    # 3.2 遞迴過濾 (確保 User >= 3 且 Item >= 7)
+    print(f"   Starting iterative filtering: User >= {MIN_INTERACTIONS}, Item >= {ITEM_MIN_INTERACTIONS}")
+    while True:
+        prev_count = len(df_target)
+        
+        # 過濾物品 (Item interaction >= 7)
+        item_counts = df_target["item"].value_counts()
+        valid_items = item_counts[item_counts >= ITEM_MIN_INTERACTIONS].index
+        df_target = df_target[df_target["item"].isin(valid_items)]
+        
+        # 過濾用戶 (Target domain interaction >= 3)
+        user_counts = df_target["user"].value_counts()
+        valid_users = user_counts[user_counts >= MIN_INTERACTIONS].index
+        df_target = df_target[df_target["user"].isin(valid_users)]
+        
+        if len(df_target) == prev_count:
+            break
     
-    print(f"   Records after Min-Interaction filter (>= {MIN_INTERACTIONS}): {len(df_target)}")
-    print(f"   Final Valid Users: {len(valid_users)}")
+    print(f"   Records after Filtering: {len(df_target)}")
+    print(f"   Final Valid Users: {len(df_target['user'].unique())}")
+    print(f"   Final Valid Items: {len(df_target['item'].unique())}")
 
     # === Step 4: 排序與 ID 重編 ===
     print("=== Step 4: Sorting and Remapping IDs ===")
@@ -193,8 +208,8 @@ def process_cross_domain():
         interactions = group[['user', 'item', 'rating']].values.tolist()
         
         # 即使前面過濾過，保險起見再檢查一次長度
-        if len(interactions) < 3:
-            # 如果少於 3 筆，全部放進 Train (或是您可以選擇丟棄)
+        if len(interactions) < MIN_INTERACTIONS:
+            # 如果少於 MIN_INTERACTIONS 筆，全部放進 Train (或是您可以選擇丟棄)
             train_data.extend(interactions)
             continue
             

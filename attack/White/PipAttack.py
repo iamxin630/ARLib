@@ -58,7 +58,7 @@ class PipAttack():
         elif self.maliciousFeedbackSize >= 1:
             self.maliciousFeedbackNum = self.maliciousFeedbackSize
         else:
-            self.maliciousFeedbackNum = int(self.maliciousFeedbackSize * self.item_num)
+            self.maliciousFeedbackNum = int(self.maliciousFeedbackSize * self.itemNum)
 
         if self.maliciousUserSize < 1:
             self.fakeUserNum = int(data.user_num * self.maliciousUserSize)
@@ -113,16 +113,17 @@ class PipAttack():
             # outer optimization
             tmpRecommender = deepcopy(recommender)
             uiAdj2 = uiAdj[:, :]
-            ui_adj = sp.csr_matrix(([], ([], [])), shape=(
-                self.userNum + self.fakeUserNum + self.itemNum, self.userNum + self.fakeUserNum + self.itemNum),
-                                    dtype=np.float32)
-            ui_adj[:self.userNum + self.fakeUserNum, self.userNum + self.fakeUserNum:] = uiAdj2
+            u_dim, i_dim = uiAdj2.shape
+            ui_adj = sp.lil_matrix((u_dim + i_dim, u_dim + i_dim), dtype=np.float32)
+            ui_adj[:u_dim, u_dim:] = uiAdj2
+            ui_adj = ui_adj.tocsr()
             tmpRecommender.model._init_uiAdj(ui_adj + ui_adj.T)
             optimizer_attack = torch.optim.Adam(tmpRecommender.model.parameters(), lr=recommender.args.lRate)
             for _ in range(self.outerEpoch):
                 Pu, Pi = tmpRecommender.model()
-                scores = torch.zeros((self.userNum + self.fakeUserNum, self.itemNum))
-                for batch in range(0,self.userNum + self.fakeUserNum, self.batchSize):
+                actual_item_num = Pi.shape[0]
+                scores = torch.zeros((Pu.shape[0], actual_item_num))
+                for batch in range(0, Pu.shape[0], self.batchSize):
                     scores[batch:batch + self.batchSize, :] = (Pu[batch:batch + self.batchSize, :] \
                                     @ Pi.T).detach()
                 nozeroInd = uiAdj2.nonzero()
@@ -144,8 +145,21 @@ class PipAttack():
                 ExplicitPromotionLoss = ExplicitPromotionLoss.mean()
                 
                 criterion = nn.CrossEntropyLoss()
-                popular_data = torch.tensor(self.interact.T.todense(), dtype=torch.float32)
-                outputs = self.popularity_model(popular_data[self.targetItem])
+                # We need item interaction vectors. Current interact shape: (user_num, item_num)
+                # item_vector should have length realuserNum to match self.popularity_model
+                current_interact = recommender.data.matrix()
+                
+                # Check which dimension is the user dimension (matching realuserNum)
+                if current_interact.shape[0] >= self.realuserNum: 
+                    # Rows are users, columns are items. We want columns.
+                    target_data = torch.tensor(np.asarray(current_interact[:, self.targetItem].T.todense()), dtype=torch.float32)
+                else:
+                    # Rows are items, columns are users. We want rows.
+                    target_data = torch.tensor(np.asarray(current_interact[self.targetItem, :].todense()), dtype=torch.float32)
+                
+                # Ensure the number of features matches the MLP input exactly
+                target_data = target_data[:, :self.realuserNum]
+                outputs = self.popularity_model(target_data)
 
                 one_hot_labels = np.zeros((len(self.targetItem), 2))
                 for idx in range(len(self.targetItem)):
@@ -188,10 +202,10 @@ class PipAttack():
             # uiAdj = uiAdj2[:, :]
 
             # inner optimization
-            ui_adj = sp.csr_matrix(([], ([], [])), shape=(
-                self.userNum + self.fakeUserNum + self.itemNum, self.userNum + self.fakeUserNum + self.itemNum),
-                                   dtype=np.float32)
-            ui_adj[:self.userNum + self.fakeUserNum, self.userNum + self.fakeUserNum:] = uiAdj
+            u_dim, i_dim = uiAdj.shape
+            ui_adj = sp.lil_matrix((u_dim + i_dim, u_dim + i_dim), dtype=np.float32)
+            ui_adj[:u_dim, u_dim:] = uiAdj
+            ui_adj = ui_adj.tocsr()
 
             recommender.model._init_uiAdj(ui_adj + ui_adj.T)
             recommender.train(Epoch=self.innerEpoch, optimizer=optimizer, evalNum=5)
@@ -235,7 +249,7 @@ class PipAttack():
         self.fakeUser = list(range(self.userNum, self.userNum + self.fakeUserNum))
         row, col, entries = [], [], []
         for u in self.fakeUser:
-            sampleItem =  random.sample(set(list(range(self.itemNum))),self.maliciousFeedbackNum)
+            sampleItem = random.sample(set(list(range(recommender.data.item_num))), self.maliciousFeedbackNum)
             for i in sampleItem:
                 recommender.data.training_data.append((recommender.data.id2user[u],recommender.data.id2item[i]))
         for pair in recommender.data.training_data:
