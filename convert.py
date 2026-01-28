@@ -9,7 +9,7 @@ import numpy as np
 
 # 1. [設定領域]
 SOURCE_CATEGORY = "Book"       # 來源領域 (用來過濾用戶)
-TARGET_CATEGORY = "Electronic"  # 目標領域 (我們要產出的資料)
+TARGET_CATEGORY = "Toy"  # 目標領域 (我們要產出的資料)
 
 # 2. [檔案路徑]
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
